@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/clocks.h"
@@ -17,11 +18,11 @@
 #include "common_dvi_pin_configs.h"
 #include "tmds_encode.h"
 
-#include "font_8x8.h"
+#include "font_8x16.h"
 #define FONT_CHAR_WIDTH 8
-#define FONT_CHAR_HEIGHT 8
-#define FONT_N_CHARS 95
-#define FONT_FIRST_ASCII 32
+#define FONT_CHAR_HEIGHT 16
+#define FONT_N_CHARS 256
+#define FONT_FIRST_ASCII 0
 
 
 // Pick one:
@@ -78,7 +79,7 @@ static inline void prepare_scanline(const char *chars, uint y) {
 	// First blit font into 1bpp scanline buffer, then encode scanbuf into tmdsbuf
 	for (uint i = 0; i < CHAR_COLS; ++i) {
 		uint c = chars[i + y / FONT_CHAR_HEIGHT * CHAR_COLS];
-		scanbuf[i] = font_8x8[(c - FONT_FIRST_ASCII) + (y % FONT_CHAR_HEIGHT) * FONT_N_CHARS];
+		scanbuf[i] = font_8x16[(c - FONT_FIRST_ASCII) + (y % FONT_CHAR_HEIGHT) * FONT_N_CHARS];
 	}
 	uint32_t *tmdsbuf;
 	queue_remove_blocking(&dvi0.q_tmds_free, &tmdsbuf);
@@ -99,8 +100,41 @@ void __not_in_flash("main") core1_main() {
 
 	// The text display is completely IRQ driven (takes up around 30% of cycles @
 	// VGA). We could do something useful, or we could just take a nice nap
-	while (1) 
+	int c_n = 0;
+	while (1) {
+		int c; 
+		c = getchar();
+		switch(c) {
+			case 0x09 :
+				while (1) {
+					charbuf[c_n]  = ' ';
+					c_n = (c_n + 1) % (CHAR_ROWS * CHAR_COLS);
+					if (c_n % 4 == 0)
+						break;
+				}
+			case 0x0D :
+				c_n = (((c_n / CHAR_COLS) + 1) * CHAR_COLS) % (CHAR_ROWS * CHAR_COLS);
+				break;
+			case 0x08 :
+			case 0x7F :
+				charbuf[(c_n - 1) % (CHAR_ROWS * CHAR_COLS)] = ' ';
+				c_n = (c_n - 1) % (CHAR_ROWS * CHAR_COLS);
+				break;
+			case 0x20 ... 0x7E:
+			case 0x80 ... 0xFF:
+				// printf("%c", c);
+				charbuf[c_n]  = c;
+				c_n = (c_n + 1) % (CHAR_ROWS * CHAR_COLS);
+				break;
+			default:
+				break;
+		}
+		// printf("%c", c);
+		// charbuf[c_n]  = c;
+		// c_n += 1;
 		__wfi();
+	}
+		// __wfi();
 	__builtin_unreachable();
 }
 
@@ -119,19 +153,23 @@ int __not_in_flash("main") main() {
 	gpio_init(LED_PIN);
 	gpio_set_dir(LED_PIN, GPIO_OUT);
 
-	printf("Configuring DVI\n");
+	// printf("Configuring DVI\n");
+
+	// for (int i = 0; i < (CHAR_ROWS * CHAR_COLS); ++i)
+	// 	charbuf[i] = 32;
 
 	dvi0.timing = &DVI_TIMING;
 	dvi0.ser_cfg = DEFAULT_DVI_SERIAL_CONFIG;
 	dvi0.scanline_callback = core1_scanline_callback;
 	dvi_init(&dvi0, next_striped_spin_lock_num(), next_striped_spin_lock_num());
 
-	printf("Prepare first scanline\n");
-	for (int i = 0; i < CHAR_ROWS * CHAR_COLS; ++i)
-		charbuf[i] = FONT_FIRST_ASCII + i % FONT_N_CHARS;
+	// printf("Prepare first scanline\n");
+	// strcpy(charbuf, "Hello, World! In the charbuf.");
+	// for (int i = 0; i < CHAR_ROWS * CHAR_COLS; ++i)
+	// 	charbuf[i] = FONT_FIRST_ASCII + i % FONT_N_CHARS;
 	prepare_scanline(charbuf, 0);
 
-	printf("Core 1 start\n");
+	// printf("Core 1 start\n");
 	sem_init(&dvi_start_sem, 0, 1);
 	hw_set_bits(&bus_ctrl_hw->priority, BUSCTRL_BUS_PRIORITY_PROC1_BITS);
 	multicore_launch_core1(core1_main);
