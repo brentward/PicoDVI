@@ -16,6 +16,7 @@ target_link_libraries(terminal
 	pico_multicore
 	pico_util
 	libdvi
+	lib6502
 )
 
 # create map/bin/hex file etc.

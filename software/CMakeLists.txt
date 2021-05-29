@@ -17,5 +17,6 @@ include_directories(
 
 add_subdirectory(libdvi)
 add_subdirectory(libsprite)
+add_subdirectory(lib6502)
 
 add_subdirectory(apps)
