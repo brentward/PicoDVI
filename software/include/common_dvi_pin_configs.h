@@ -8,7 +8,8 @@
 #include "dvi_serialiser.h"
 
 #ifndef DEFAULT_DVI_SERIAL_CONFIG
-#define DEFAULT_DVI_SERIAL_CONFIG pico_sock_cfg
+// #define DEFAULT_DVI_SERIAL_CONFIG pico_sock_cfg
+#define DEFAULT_DVI_SERIAL_CONFIG pico_breadboard_cfg
 #endif
 
 // ----------------------------------------------------------------------------
@@ -62,6 +63,15 @@ static const struct dvi_serialiser_cfg pico_sock_cfg = {
 	.sm_tmds = {0, 1, 2},
 	.pins_tmds = {12, 18, 16},
 	.pins_clk = 14,
+	.invert_diffpairs = false
+};
+
+// Breadboard with 6502 data bus
+static const struct dvi_serialiser_cfg pico_breadboard_cfg = {
+	.pio = pio0,
+	.sm_tmds = {0, 1, 2},
+	.pins_tmds = {20, 18, 16},
+	.pins_clk = 26,
 	.invert_diffpairs = false
 };
 

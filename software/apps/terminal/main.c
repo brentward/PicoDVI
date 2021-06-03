@@ -18,7 +18,7 @@
 #include "common_dvi_pin_configs.h"
 #include "tmds_encode.h"
 
-#include "6502bus.h"
+// #include "6502bus.h"
 
 #include "font_8x16.h"
 #define FONT_CHAR_WIDTH 8
