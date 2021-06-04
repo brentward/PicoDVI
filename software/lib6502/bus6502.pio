@@ -1,0 +1,108 @@
+; Define the relative pin numbers
+
+.define DATA_PIN     0
+.define ADDR_PIN     8
+.define RNW_PIN     11
+.define NRST_PIN    12
+.define NCS_PIN     13
+.define PHI2_PIN    14
+
+; tAD is the delay in between the falling edge of Phi2 and nCS/A/RnW being sampled
+;
+; this parameter is critial
+; - too low and you potentially miss ntube (which can lag phi2 by ~100ns)
+; - too high and you erode the read data setup time
+;
+; for my SY6502A 20 seems to work, 16 will often crash in tube elite
+; for my UM6502CE 16 seems to work, 20 will often crash in tube elite
+;
+; Possibly noise is worse in my environment because I'm currently using a tube silencer
+; and a breadboard. Grounding is particulaly poor. The address bus suffers glitches in
+; in the middle of the cycle
+;
+
+.define tAD         20  ; 150ns
+
+; tDB is the delay between the rising edge of a signal and when it's safe to start
+; looking for the falling edge. It's used mostly on Phi2, which can suffer noise
+; due to crosstalk from the data bus being driven
+;
+; this parameter is much less critical
+
+.define tDB         16  ; 120ns
+
+; ====================================================================================
+; PIO 0
+;
+; Detect a tube access and place a sample of the GPIO bits in the Tx FIFO (of SM3)
+;
+; In a bit more detail:
+; - SM0 - Detect a genuine tube access (include deglitching nCS) or nRST
+; - SM1 - Test the RnW pin (to allow some reads to be filtered out)
+; - SM2 - Test the A0 pin (to allow status reads to be filtered out)
+; - SM3 - Re-sample GPIOs towards the end of phase 2 and push to Tx FIFO
+;
+; All GPIOs are used as inputs; nothing is driven back
+;
+; (11 + 4 + 3 + 5 = 23 instructions)
+;
+; ====================================================================================
+
+; SM0 - Detect a genuine tube access (include deglitching nTUBE) or nRST
+
+.program bus6502_control0
+reset:
+    irq set 2                  ; reset detected
+    wait 1 gpio NRST_PIN       ; wait for reset released
+.wrap_target
+public entry_point:
+idle:
+    wait 1 gpio PHI2_PIN [tDB] ; wait for PHI2 to go high
+                               ; delay tDB to sample nRST away from when data bus changing to avoid crosstalk
+
+    in pins, 1                 ; right-shift nRST into ISR (bit 31)
+    in null, 31                ; right-shift a further 31 zeros so nRST is correctly aligned
+    mov x, isr                 ; y = nRST
+    set y, 1
+    jmp x!=y reset             ; if nRST != 1 then jmp to reset
+
+    wait 0 gpio PHI2_PIN [tAD] ; wait for PHI2 to go low
+                               ; delay tAD to sample nCS when stable
+
+    jmp pin, idle              ; test nTUBE half waythrough phase1 when it should be stable
+    irq set 0                  ; irq 0 indicates nCS has definitely been asserted
+.wrap
+
+; SM1 - Test the RnW pin
+
+.program bus6502_control1
+read_cycle:
+    irq set 1                  ; read cycle, so activate sm2 for outputing data (not implemented)
+.wrap_target
+public entry_point:
+    wait 1 irq 0               ; wait for irq 0 and clear it
+    jmp pin, read_cycle        ; test the RnW bit
+    irq set 2                  ; write cycle, so activate sm3 to sample the GPIOs
+.wrap
+
+; SM2 - Test the A0 pin
+
+.program bus6502_control2
+.wrap_target
+public entry_point:
+    wait 1 irq 1               ; wait for irq 1 and clear it
+.wrap
+
+; SM3 - Re-sample GPIOs towards the end of phase 2 and push to Tx FIFO
+
+.program bus6502_control3
+.wrap_target
+public entry_point:
+    wait 1 irq 2               ; wait for irq 2 and clear it
+    wait 1 pin PHI2_PIN [tDB]  ; wait for PHI2 pin to go high
+                               ; delay tDB in case of noise around transition
+    wait 0 pin PHI2_PIN        ; wait for PHI2 pin to go low
+    in pins, 8                 ; sample the gpio towards a the end of Phase 2
+    push                       ; push sample into the Rx FIFO
+.wrap
+
